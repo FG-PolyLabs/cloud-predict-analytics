@@ -13,6 +13,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -172,9 +173,19 @@ func main() {
 		return
 	}
 
-	// TODO: load snapshots into BigQuery
-	// bq.Load(ctx, "polymarket_predictions", snapshots)
-	log.Fatal("BigQuery loading not yet implemented — rerun with --dry-run to print rows")
+	ctx := context.Background()
+	loader, err := polymarket.NewBQLoader(ctx, "fg-polylabs", "weather", "polymarket_snapshots")
+	if err != nil {
+		log.Fatalf("creating BigQuery loader: %v", err)
+	}
+	defer loader.Close()
+
+	inserted, err := loader.MergeSnapshots(ctx, snapshots)
+	if err != nil {
+		log.Fatalf("merging snapshots into BigQuery: %v", err)
+	}
+	skipped := len(snapshots) - inserted
+	log.Printf("done: %d new rows inserted, %d duplicates skipped", inserted, skipped)
 }
 
 // buildEventSlug constructs the Polymarket event slug from city and date.
