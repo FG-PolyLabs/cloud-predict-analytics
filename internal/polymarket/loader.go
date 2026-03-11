@@ -84,13 +84,16 @@ func (l *BQLoader) MergeSnapshots(ctx context.Context, snapshots []PredictionSna
 		return 0, fmt.Errorf("staging load failed: %w", err)
 	}
 
-	// MERGE: insert only rows whose (market_id, timestamp) key is new.
-	// The target table is day-partitioned on `date` so this only scans the
-	// relevant day partition — not the whole table.
+	// MERGE: insert only rows whose (event_slug, temp_threshold, timestamp) key is new.
+	// This correctly identifies a unique price point per market per moment in time
+	// without needing market_id. Day-partitioned on `date` so only the relevant
+	// partition is scanned.
 	mergeSQL := fmt.Sprintf(
 		"MERGE `%s.%s.%s` T "+
 			"USING `%s.%s.%s` S "+
-			"ON T.market_id = S.market_id AND T.timestamp = S.timestamp "+
+			"ON T.event_slug = S.event_slug "+
+			"AND T.temp_threshold = S.temp_threshold "+
+			"AND T.timestamp = S.timestamp "+
 			"WHEN NOT MATCHED THEN INSERT ROW",
 		l.projectID, l.datasetID, l.tableID,
 		l.projectID, l.datasetID, stagingID,
@@ -124,24 +127,19 @@ func snapshotSchema() bigquery.Schema {
 		return &bigquery.FieldSchema{Name: name, Type: t}
 	}
 	return bigquery.Schema{
-		req("city",              bigquery.StringFieldType),
-		req("date",              bigquery.DateFieldType),
-		req("timestamp",         bigquery.TimestampFieldType),
-		req("temp_threshold",    bigquery.FloatFieldType),
-		req("yes_cost",          bigquery.FloatFieldType),
-		req("no_cost",           bigquery.FloatFieldType),
-		opt("best_bid",          bigquery.FloatFieldType),
-		opt("best_ask",          bigquery.FloatFieldType),
-		opt("spread",            bigquery.FloatFieldType),
-		opt("volume_24h",        bigquery.FloatFieldType),
-		opt("volume_total",      bigquery.FloatFieldType),
-		opt("liquidity",         bigquery.FloatFieldType),
-		req("market_id",         bigquery.StringFieldType),
-		req("event_slug",        bigquery.StringFieldType),
-		opt("market_end_date",   bigquery.StringFieldType),
-		opt("market_start_date", bigquery.StringFieldType),
-		opt("accepting_orders",  bigquery.BooleanFieldType),
-		opt("neg_risk",          bigquery.BooleanFieldType),
-		req("ingested_at",       bigquery.TimestampFieldType),
+		req("city",            bigquery.StringFieldType),
+		req("date",            bigquery.DateFieldType),
+		req("timestamp",       bigquery.TimestampFieldType),
+		req("temp_threshold",  bigquery.FloatFieldType),
+		req("yes_cost",        bigquery.FloatFieldType),
+		req("no_cost",         bigquery.FloatFieldType),
+		opt("best_bid",        bigquery.FloatFieldType),
+		opt("best_ask",        bigquery.FloatFieldType),
+		opt("spread",          bigquery.FloatFieldType),
+		opt("volume_24h",      bigquery.FloatFieldType),
+		opt("volume_total",    bigquery.FloatFieldType),
+		opt("liquidity",       bigquery.FloatFieldType),
+		req("event_slug",      bigquery.StringFieldType),
+		opt("market_end_date", bigquery.StringFieldType),
 	}
 }

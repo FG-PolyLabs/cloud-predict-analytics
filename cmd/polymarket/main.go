@@ -18,6 +18,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -55,6 +56,8 @@ func main() {
 	}
 	log.Printf("resolved event slug: %s", eventSlug)
 
+	cityLabel := normalizeCity(*city)
+
 	client := polymarket.NewClient()
 
 	// The event endpoint is the canonical source: it returns the event's markets directly.
@@ -62,6 +65,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("could not find event for slug %q: %v", slug, err)
 	}
+	// If city wasn't provided via flag, extract it from the event title.
+	// Title format: "Highest Temperature in London on March 6, 2026"
+	if cityLabel == "" {
+		cityLabel = extractCityFromTitle(event.Title)
+	}
+
 	markets := event.Markets
 
 	if len(markets) == 0 {
@@ -90,22 +99,30 @@ func main() {
 		}
 	}
 
-	cityLabel := normalizeCity(*city) // empty string when --slug used without --city
-
-	// Day boundaries in UTC.
-	dayStart := time.Date(eventDate.Year(), eventDate.Month(), eventDate.Day(), 0, 0, 0, 0, time.UTC)
-	dayEnd := dayStart.Add(24 * time.Hour)
-	ingestedAt := time.Now().UTC()
+	// History end = end of the event/resolution date.
+	dayEnd := time.Date(eventDate.Year(), eventDate.Month(), eventDate.Day()+1, 0, 0, 0, 0, time.UTC)
 
 	var snapshots []polymarket.PredictionSnapshot
 
 	for _, market := range markets {
 		threshold := extractTempThreshold(market.Question)
-		log.Printf("pulling price history for market: %s (threshold: %.1f°C)", market.Question, threshold)
+
+		// History start = when this market opened for trading.
+		// Falls back to the start of the event date if StartDateIso is missing.
+		histStart := time.Date(eventDate.Year(), eventDate.Month(), eventDate.Day(), 0, 0, 0, 0, time.UTC)
+		if market.StartDateIso != "" {
+			if t, err := time.Parse("2006-01-02", market.StartDateIso[:10]); err == nil {
+				histStart = t
+			}
+		}
+
+		log.Printf("pulling price history for market: %s (%.1f°C) from %s to %s",
+			market.Question, threshold,
+			histStart.Format("2006-01-02"), eventDate.Format("2006-01-02"))
 
 		yesHistory, err := client.GetPriceHistory(
 			market.YesTokenID(),
-			dayStart.Unix(),
+			histStart.Unix(),
 			dayEnd.Unix(),
 			*fidelity,
 		)
@@ -116,7 +133,7 @@ func main() {
 
 		noHistory, err := client.GetPriceHistory(
 			market.NoTokenID(),
-			dayStart.Unix(),
+			histStart.Unix(),
 			dayEnd.Unix(),
 			*fidelity,
 		)
@@ -125,38 +142,62 @@ func main() {
 			noHistory = deriveNoHistory(yesHistory)
 		}
 
+		// Filter 1: skip the entire market if it has never been traded.
+		// Zero volume + zero liquidity means no real price discovery has happened.
+		if market.VolumeTotal == 0 && market.Liquidity == 0 {
+			log.Printf("skipping market %.1f°C — no trading activity", threshold)
+			continue
+		}
+
+		// Parse market end time for post-resolution filter.
+		var marketEnd time.Time
+		if market.EndDateIso != "" {
+			marketEnd, _ = time.Parse("2006-01-02", market.EndDateIso[:10])
+			marketEnd = marketEnd.Add(24 * time.Hour) // end of that day
+		}
+
 		noPriceByTs := make(map[int64]float64, len(noHistory))
 		for _, pt := range noHistory {
 			noPriceByTs[pt.T] = pt.P
 		}
 
 		spread := market.BestAsk - market.BestBid
+		var lastYesCost float64 = -1 // sentinel so the first point always passes
 
 		for _, pt := range yesHistory {
+			ts := time.Unix(pt.T, 0).UTC()
+
+			// Filter 2: skip rows after the market has resolved.
+			if !marketEnd.IsZero() && ts.After(marketEnd) {
+				continue
+			}
+
+			// Filter 3: skip rows where price hasn't changed from the previous snapshot.
+			// Tolerance of 0.001 (0.1%) avoids storing noise-level fluctuations.
+			if math.Abs(pt.P-lastYesCost) < 0.001 {
+				continue
+			}
+			lastYesCost = pt.P
+
 			noPrice := noPriceByTs[pt.T]
 			if noPrice == 0 {
 				noPrice = 1.0 - pt.P
 			}
 			snapshots = append(snapshots, polymarket.PredictionSnapshot{
-				City:            cityLabel,
-				Date:            *date,
-				Timestamp:       time.Unix(pt.T, 0).UTC(),
-				TempThreshold:   threshold,
-				YesCost:         pt.P,
-				NoCost:          noPrice,
-				BestBid:         market.BestBid,
-				BestAsk:         market.BestAsk,
-				Spread:          spread,
-				Volume24h:       market.Volume24hr,
-				VolumeTotal:     market.VolumeTotal,
-				Liquidity:       market.Liquidity,
-				MarketID:        market.ConditionID,
-				EventSlug:       eventSlug,
-				MarketEndDate:   market.EndDateIso,
-				MarketStartDate: market.StartDateIso,
-				AcceptingOrders: market.AcceptingOrders,
-				NegRisk:         market.NegRisk,
-				IngestedAt:      ingestedAt,
+				City:          cityLabel,
+				Date:          *date,
+				Timestamp:     ts,
+				TempThreshold: threshold,
+				YesCost:       pt.P,
+				NoCost:        noPrice,
+				BestBid:       market.BestBid,
+				BestAsk:       market.BestAsk,
+				Spread:        spread,
+				Volume24h:     market.Volume24hr,
+				VolumeTotal:   market.VolumeTotal,
+				Liquidity:     market.Liquidity,
+				EventSlug:     eventSlug,
+				MarketEndDate: market.EndDateIso,
 			})
 		}
 	}
@@ -186,6 +227,18 @@ func main() {
 	}
 	skipped := len(snapshots) - inserted
 	log.Printf("done: %d new rows inserted, %d duplicates skipped", inserted, skipped)
+}
+
+// extractCityFromTitle parses the city from a Polymarket event title.
+// e.g., "Highest Temperature in London on March 6, 2026" → "london"
+func extractCityFromTitle(title string) string {
+	lower := strings.ToLower(title)
+	inIdx := strings.Index(lower, " in ")
+	onIdx := strings.Index(lower, " on ")
+	if inIdx == -1 || onIdx == -1 || onIdx <= inIdx {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(title[inIdx+4 : onIdx]))
 }
 
 // buildEventSlug constructs the Polymarket event slug from city and date.
