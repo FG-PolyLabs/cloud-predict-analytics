@@ -16,7 +16,7 @@ set -euo pipefail
 PROJECT_ID="fg-polylabs"
 REGION="us-central1"
 AR_REPO="polymarket"
-IMAGE="us-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/polymarket"
+IMAGE="us-central1-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/polymarket"
 JOB_NAME="polymarket"
 RUNNER_SA="polymarket-runner"
 CI_SA="github-actions-ci"

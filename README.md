@@ -91,7 +91,7 @@ The script prints two values at the end — add them as GitHub Actions secrets:
 
 Every push to `main` automatically:
 1. Builds the Docker image
-2. Pushes it to Artifact Registry (`us-docker.pkg.dev/fg-polylabs/polymarket/polymarket`)
+2. Pushes it to Artifact Registry (`us-central1-docker.pkg.dev/fg-polylabs/polymarket/polymarket`)
 3. Updates the Cloud Run Job to the new image SHA
 
 Workflow: `.github/workflows/build.yml`
