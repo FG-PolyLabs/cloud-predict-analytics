@@ -34,6 +34,7 @@ func main() {
 	temp := flag.Float64("temp", 0, "Temperature threshold in Celsius to filter a specific market (0 = all markets)")
 	fidelity := flag.Int("fidelity", 60, "Price snapshot granularity in minutes (e.g., 60=hourly, 1=per-minute)")
 	dryRun := flag.Bool("dry-run", false, "Print rows as JSONL to stdout instead of loading to BigQuery")
+	noVolume := flag.Bool("no-volume", false, "Store NULL for volume/liquidity/bid-ask fields (use for historical backfills where market-state data is misleading)")
 	flag.Parse()
 
 	if *date == "" {
@@ -161,11 +162,10 @@ func main() {
 			noPriceByTs[pt.T] = pt.P
 		}
 
-		spread := market.BestAsk - market.BestBid
 		var lastYesCost float64 = -1 // sentinel so the first point always passes
 
 		for _, pt := range yesHistory {
-			ts := time.Unix(pt.T, 0).UTC()
+			ts := time.Unix(pt.T, 0).UTC().Round(time.Minute)
 
 			// Filter 2: skip rows after the market has resolved.
 			if !marketEnd.IsZero() && ts.After(marketEnd) {
@@ -189,22 +189,32 @@ func main() {
 			if noPrice == 0 {
 				noPrice = 1.0 - pt.P
 			}
-			snapshots = append(snapshots, polymarket.PredictionSnapshot{
+
+			snap := polymarket.PredictionSnapshot{
 				City:          cityLabel,
 				Date:          *date,
 				Timestamp:     ts,
 				TempThreshold: threshold,
 				YesCost:       pt.P,
 				NoCost:        noPrice,
-				BestBid:       market.BestBid,
-				BestAsk:       market.BestAsk,
-				Spread:        spread,
-				Volume24h:     market.Volume24hr,
-				VolumeTotal:   market.VolumeTotal,
-				Liquidity:     market.Liquidity,
 				EventSlug:     eventSlug,
 				MarketEndDate: market.EndDateIso,
-			})
+			}
+			if !*noVolume {
+				bid := market.BestBid
+				ask := market.BestAsk
+				spr := market.BestAsk - market.BestBid
+				vol24 := market.Volume24hr
+				volTotal := market.VolumeTotal
+				liq := market.Liquidity
+				snap.BestBid = &bid
+				snap.BestAsk = &ask
+				snap.Spread = &spr
+				snap.Volume24h = &vol24
+				snap.VolumeTotal = &volTotal
+				snap.Liquidity = &liq
+			}
+			snapshots = append(snapshots, snap)
 		}
 	}
 

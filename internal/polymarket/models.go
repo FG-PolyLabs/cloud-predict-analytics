@@ -93,12 +93,12 @@ type PredictionSnapshot struct {
 	TempThreshold float64   `json:"temp_threshold"` // e.g. 10.0 for "above 10°C"
 	YesCost       float64   `json:"yes_cost"`       // implied probability of YES (0.0-1.0)
 	NoCost        float64   `json:"no_cost"`        // implied probability of NO (0.0-1.0)
-	BestBid       float64   `json:"best_bid"`       // best bid for YES token at snapshot
-	BestAsk       float64   `json:"best_ask"`       // best ask for YES token at snapshot
-	Spread        float64   `json:"spread"`         // best_ask - best_bid
-	Volume24h     float64   `json:"volume_24h"`     // 24h trading volume in USDC
-	VolumeTotal   float64   `json:"volume_total"`   // lifetime trading volume in USDC
-	Liquidity     float64   `json:"liquidity"`      // market liquidity in USDC
+	BestBid       *float64  `json:"best_bid"`       // best bid for YES token at snapshot; null when --no-volume is set
+	BestAsk       *float64  `json:"best_ask"`       // best ask for YES token at snapshot; null when --no-volume is set
+	Spread        *float64  `json:"spread"`         // best_ask - best_bid; null when --no-volume is set
+	Volume24h     *float64  `json:"volume_24h"`     // 24h trading volume in USDC; null when --no-volume is set
+	VolumeTotal   *float64  `json:"volume_total"`   // lifetime trading volume in USDC; null when --no-volume is set
+	Liquidity     *float64  `json:"liquidity"`      // market liquidity in USDC; null when --no-volume is set
 	EventSlug     string    `json:"event_slug"`     // Polymarket event slug
 	MarketEndDate string    `json:"market_end_date"` // ISO date when the market resolves
 }
