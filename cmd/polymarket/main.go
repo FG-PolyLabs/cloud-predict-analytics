@@ -165,7 +165,7 @@ func main() {
 		var lastYesCost float64 = -1 // sentinel so the first point always passes
 
 		for _, pt := range yesHistory {
-			ts := time.Unix(pt.T, 0).UTC().Round(time.Minute)
+			ts := time.Unix(pt.T, 0).UTC().Round(15 * time.Minute)
 
 			// Filter 2: skip rows after the market has resolved.
 			if !marketEnd.IsZero() && ts.After(marketEnd) {
