@@ -172,7 +172,13 @@ func main() {
 				continue
 			}
 
-			// Filter 3: skip rows where price hasn't changed from the previous snapshot.
+			// Filter 3: skip rows where the YES price is at or near resolution (≥0.99 or ≤0.01).
+			// These indicate the market has effectively settled and carry no analytical signal.
+			if pt.P >= 0.99 || pt.P <= 0.01 {
+				continue
+			}
+
+			// Filter 4: skip rows where price hasn't changed from the previous snapshot.
 			// Tolerance of 0.001 (0.1%) avoids storing noise-level fluctuations.
 			if math.Abs(pt.P-lastYesCost) < 0.001 {
 				continue
