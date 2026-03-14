@@ -42,6 +42,7 @@ CRON=""
 SCHEDULE_NAME=""
 NO_VOLUME=""
 YESTERDAY=""
+NO_WAIT=""
 
 for arg in "$@"; do
   case $arg in
@@ -54,6 +55,7 @@ for arg in "$@"; do
     --name=*)      SCHEDULE_NAME="${arg#*=}" ;;
     --no-volume)   NO_VOLUME="true" ;;
     --yesterday)   YESTERDAY="true" ;;
+    --no-wait)     NO_WAIT="true" ;;
   esac
 done
 
@@ -129,11 +131,18 @@ case "$SUBCOMMAND" in
     [[ "$FIDELITY" != "60" ]] && GCLOUD_ARGS="${GCLOUD_ARGS},--fidelity=${FIDELITY}"
     [[ -n "$NO_VOLUME" ]]     && GCLOUD_ARGS="${GCLOUD_ARGS},--no-volume"
 
-    gcloud run jobs execute "${JOB_NAME}" \
-      --region="${REGION}" \
-      --project="${PROJECT_ID}" \
-      --args="${GCLOUD_ARGS}" \
-      --wait
+    if [[ -n "$NO_WAIT" ]]; then
+      gcloud run jobs execute "${JOB_NAME}" \
+        --region="${REGION}" \
+        --project="${PROJECT_ID}" \
+        --args="${GCLOUD_ARGS}"
+    else
+      gcloud run jobs execute "${JOB_NAME}" \
+        --region="${REGION}" \
+        --project="${PROJECT_ID}" \
+        --args="${GCLOUD_ARGS}" \
+        --wait
+    fi
 
     echo ""
     echo "==> Done. Check results in BigQuery:"
